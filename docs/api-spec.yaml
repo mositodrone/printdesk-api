@@ -1,0 +1,434 @@
+openapi: 3.0.3
+
+info:
+  title: PrintDesk API
+  version: 1.0.0
+  description: |
+    REST API for tracking custom-print shop orders (T-shirts, hoodies, caps).
+    Backend Development track, BuildLab Stage 1 - Week 1 spec (Order endpoints).
+
+    Conventions
+    - JSON only. Request and response fields use camelCase.
+    - Resource IDs are 24-character MongoDB ObjectId strings, exposed as `id`.
+    - A malformed ID (not 24 hex characters) returns 400, not 404 or 500.
+    - Errors always use the same shape (see the Error schema). Stack traces are never returned.
+    - Timestamps are ISO 8601 UTC. `dueDate` is a plain date (YYYY-MM-DD).
+    - All data is dummy data.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://REPLACE-WITH-LIVE-URL.example.com
+    description: Live API (free host - first request after idle may take 30-60s)
+
+tags:
+  - name: Orders
+    description: Create, read, update and delete shop orders, and move them through their status stages.
+
+paths:
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List orders
+      description: Returns a paginated list of orders. Filters can be combined.
+      operationId: listOrders
+      parameters:
+        - name: status
+          in: query
+          description: Only return orders with this status.
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: customerId
+          in: query
+          description: Only return orders for this customer.
+          schema:
+            $ref: '#/components/schemas/ObjectId'
+        - name: page
+          in: query
+          description: Page number, starting at 1.
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Orders per page.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: sort
+          in: query
+          description: Sort field. Prefix with `-` for descending.
+          schema:
+            type: string
+            enum: [createdAt, -createdAt, dueDate, -dueDate]
+            default: -createdAt
+      responses:
+        '200':
+          description: Orders found (an empty list is still a 200).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    post:
+      tags: [Orders]
+      summary: Create an order
+      description: |
+        Creates an order for an existing customer. `status` is always set to
+        `received` on creation. If `customerId` is well-formed but does not match
+        an existing customer, the response is 400.
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderCreate'
+            example:
+              customerId: 665f1c2e8a1b2c3d4e5f6a01
+              dueDate: '2026-11-05'
+              notes: Church group event, needs matching colours
+      responses:
+        '201':
+          description: Order created.
+          headers:
+            Location:
+              description: Path of the new order.
+              schema:
+                type: string
+                example: /orders/665f1c2e8a1b2c3d4e5f6b10
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /orders/{id}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+
+    get:
+      tags: [Orders]
+      summary: Get one order
+      operationId: getOrder
+      responses:
+        '200':
+          description: Order found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    patch:
+      tags: [Orders]
+      summary: Update an order's details
+      description: |
+        Partial update. Send only the fields you want to change; at least one is required.
+        `status` cannot be changed here, use `PATCH /orders/{id}/status`.
+      operationId: updateOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderUpdate'
+            example:
+              dueDate: '2026-11-10'
+              notes: Due date moved back by customer
+      responses:
+        '200':
+          description: Order updated. Returns the full updated order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    delete:
+      tags: [Orders]
+      summary: Delete an order
+      description: |
+        Permanently deletes the order. Returns 200 with the deleted order's ID so
+        the client can confirm what was removed.
+      operationId: deleteOrder
+      responses:
+        '200':
+          description: Order deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message, id]
+                properties:
+                  message:
+                    type: string
+                    example: Order deleted
+                  id:
+                    $ref: '#/components/schemas/ObjectId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /health:
+    get:
+      summary: Health check
+      description: Returns 200 when the server is up. Also wakes a sleeping free-tier host.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+
+  /orders/{id}/status:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+
+    patch:
+      tags: [Orders]
+      summary: Change an order's status
+      description: |
+        Moves an order to a new status. This is a separate endpoint from
+        `PATCH /orders/{id}` so that, once roles exist (Week 2), staff can be allowed
+        to update status without being allowed to edit other order details.
+      operationId: updateOrderStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderStatusUpdate'
+            example:
+              status: printing
+      responses:
+        '200':
+          description: Status updated. Returns the full updated order.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+components:
+  parameters:
+    OrderId:
+      name: id
+      in: path
+      required: true
+      description: The order's ID (24-character hex string).
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+
+  schemas:
+    ObjectId:
+      type: string
+      pattern: '^[a-f0-9]{24}$'
+      example: 665f1c2e8a1b2c3d4e5f6b10
+
+    OrderStatus:
+      type: string
+      enum: [received, printing, ready, delivered, cancelled]
+
+    Order:
+      type: object
+      required: [id, customerId, status, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
+        customerId:
+          $ref: '#/components/schemas/ObjectId'
+        handledBy:
+          description: Staff member who handled the order. Null until staff auth exists (Week 2).
+          allOf:
+            - $ref: '#/components/schemas/ObjectId'
+          nullable: true
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-11-05'
+        notes:
+          type: string
+          maxLength: 500
+          nullable: true
+          example: Church group event, needs matching colours
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-13T09:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-13T09:30:00.000Z'
+
+    OrderCreate:
+      type: object
+      required: [customerId]
+      additionalProperties: false
+      properties:
+        customerId:
+          $ref: '#/components/schemas/ObjectId'
+        dueDate:
+          type: string
+          format: date
+          description: Must be today or later.
+        notes:
+          type: string
+          maxLength: 500
+
+    OrderUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        customerId:
+          $ref: '#/components/schemas/ObjectId'
+        dueDate:
+          type: string
+          format: date
+          nullable: true
+        notes:
+          type: string
+          maxLength: 500
+          nullable: true
+
+    OrderStatusUpdate:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+
+    OrderList:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        pagination:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page:
+              type: integer
+              example: 1
+            limit:
+              type: integer
+              example: 20
+            total:
+              type: integer
+              description: Total orders matching the filters.
+              example: 42
+            totalPages:
+              type: integer
+              example: 3
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable error code.
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              description: Human-readable summary, safe to show to a client.
+              example: Request body is invalid
+            details:
+              type: array
+              description: Field-level problems, present for validation errors.
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    example: customerId
+                  issue:
+                    type: string
+                    example: customerId is required
+
+  responses:
+    BadRequest:
+      description: |
+        Invalid input: malformed ID, missing or wrongly typed field, unknown field,
+        invalid status value, bad query parameter, or a `customerId` that does not
+        match an existing customer.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Request body is invalid
+              details:
+                - field: customerId
+                  issue: customerId is required
+
+    NotFound:
+      description: No order exists with that ID.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: ORDER_NOT_FOUND
+              message: Order not found
+
+    ServerError:
+      description: Unexpected server error. No stack trace or internal detail is returned.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: Something went wrong
