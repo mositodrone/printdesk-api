@@ -1,0 +1,32 @@
+{
+  "name": "printdesk-api",
+  "version": "1.0.0",
+  "description": "Order-tracking REST API for small custom-print shops.\r Backend Development track, BuildLab Stage 1.",
+  "main": "index.js",
+  "type": "module",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "seed": "node src/seed/seed.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mositodrone/printdesk-api.git"
+  },
+  "author": "moses",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/mositodrone/printdesk-api/issues"
+  },
+  "homepage": "https://github.com/mositodrone/printdesk-api#readme",
+  "dependencies": {
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "mongoose": "^9.11.2",
+    "nodemon": "^3.1.14",
+    "zod": "^4.6.7"
+  }
+}
