@@ -1,0 +1,133 @@
+# PrintDesk API: sample requests (REST Client extension for VS Code)
+#
+# START HERE:
+#   1. Send "listOrders" first (below). Other requests read ids from its response.
+#   2. Then send "createOrder". The get / update / status / delete requests use the
+#      order it creates, so the seeded data is never touched.
+#   3. Work top to bottom. After reloading VS Code, send both again.
+#
+# Local: leave @baseUrl as is. Live: swap it for the deployed URL.
+# Local only: run `npm run seed` first so there is data to read.
+
+@baseUrl = http://localhost:3000
+
+###
+# ---------- SETUP (send these first) ----------
+
+### Health check (also wakes a sleeping free-tier server) -> 200
+GET {{baseUrl}}/health
+
+### listOrders -> 200 (newest first; provides a customerId for later requests)
+# @name listOrders
+GET {{baseUrl}}/orders?limit=1
+
+###
+# ---------- HAPPY PATHS ----------
+
+### List orders with filters, sorting and paging -> 200
+GET {{baseUrl}}/orders?status=printing&sort=dueDate&page=1&limit=5
+
+### createOrder -> 201 (note the Location header and status "received")
+# @name createOrder
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "customerId": "{{listOrders.response.body.$.data[0].customerId}}",
+  "dueDate": "2030-01-15",
+  "notes": "Sample order from orders.http"
+}
+
+### Get the order just created -> 200
+GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+
+### Update its details -> 200
+PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "dueDate": "2030-02-01",
+  "notes": "Due date moved back by customer"
+}
+
+### Change its status -> 200
+PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/status
+Content-Type: application/json
+
+{
+  "status": "printing"
+}
+
+### Filter by that status -> 200 (the order should appear)
+GET {{baseUrl}}/orders?status=printing
+
+### Delete the order just created -> 200
+DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+
+###
+# ---------- FAILURE CASES ----------
+
+### Order that no longer exists (deleted above) -> 404
+GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+
+### Valid id that does not exist -> 404
+GET {{baseUrl}}/orders/000000000000000000000000
+
+### Malformed id -> 400
+GET {{baseUrl}}/orders/not-a-real-id
+
+### Missing required customerId -> 400
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "notes": "no customer"
+}
+
+### customerId that matches no customer -> 400
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "customerId": "000000000000000000000000"
+}
+
+### Unknown field -> 400
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "customerId": "{{listOrders.response.body.$.data[0].customerId}}",
+  "priority": "high"
+}
+
+### Due date in the past -> 400
+POST {{baseUrl}}/orders
+Content-Type: application/json
+
+{
+  "customerId": "{{listOrders.response.body.$.data[0].customerId}}",
+  "dueDate": "2020-01-01"
+}
+
+### Invalid status value -> 400
+PATCH {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/status
+Content-Type: application/json
+
+{
+  "status": "shipped"
+}
+
+### Status cannot be changed through the details endpoint -> 400
+PATCH {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}
+Content-Type: application/json
+
+{
+  "status": "ready"
+}
+
+### Bad query parameters -> 400
+GET {{baseUrl}}/orders?status=shipped&limit=500
+
+### Unknown route -> 404
+GET {{baseUrl}}/nope
