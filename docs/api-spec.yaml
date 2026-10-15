@@ -26,6 +26,34 @@ tags:
     description: Create, read, update and delete shop orders, and move them through their status stages.
 
 paths:
+  /:
+    get:
+      summary: API root
+      description: Returns the API name and its top-level endpoints, so the base URL shows something useful in a browser.
+      operationId: getRoot
+      responses:
+        '200':
+          description: API is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    example: PrintDesk API
+                  status:
+                    type: string
+                    example: ok
+                  endpoints:
+                    type: object
+                    properties:
+                      health:
+                        type: string
+                        example: /health
+                      orders:
+                        type: string
+                        example: /orders
   /orders:
     get:
       tags: [Orders]
