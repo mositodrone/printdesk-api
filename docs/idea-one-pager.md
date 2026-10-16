@@ -1,5 +1,11 @@
 # PrintDesk
 
+**Project links**
+- Repo (public): https://github.com/mositodrone/printdesk-api
+- Submitted tag: `week-1` (https://github.com/mositodrone/printdesk-api/tree/week-1)
+- Live API: https://printdesk-api.onrender.com
+- Week 1 docs (Drive): https://drive.google.com/drive/folders/1IqhGcwtNn7upJP8d1_SY8q7hoZ0yqswg?usp=sharing
+
 Track: Backend Development   Stack: Node.js, Express, MongoDB (Atlas) with Mongoose, Zod
 
 Target user: The owner or staff of a small custom-print shop (T-shirts, hoodies, caps) who takes orders by chat or walk-in.
@@ -26,8 +32,8 @@ Node/Express and MongoDB are what I know best (prior MERN experience), so the ti
 - Status is a fixed set, changed through its own endpoint so roles can restrict it later
 - Customers and garment types are seeded in Week 1; their endpoints come in Week 2
 
-## Links
-Full reasoning: docs/design-decisions.md | ERD: docs/erd.png | Spec: docs/api-spec.yaml | Drive folder: https://drive.google.com/drive/folders/1IqhGcwtNn7upJP8d1_SY8q7hoZ0yqswg?usp=sharing
+## Related documents
+Full reasoning: design-decisions. ERD: erd. API spec: api-spec. All are in the Drive folder above and in `docs/` in the repo.
 
 ## Top 3 risks
 1. Scope creep into payments or uploads

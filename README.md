@@ -41,7 +41,7 @@ Full request and response details are in the API spec (see Docs).
 ## Run locally
 Requires Node 20+ and a MongoDB database (a free Atlas cluster works, or a local MongoDB).
 
-1. `git clone <repo-url> && cd printdesk-api`
+1. `git clone https://github.com/mositodrone/printdesk-api.git && cd printdesk-api`
 2. `npm install`
 3. `cp .env.example .env` and fill in the values below
 4. `npm run seed` (loads dummy customers, garment types and orders)
