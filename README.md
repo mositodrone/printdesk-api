@@ -91,7 +91,7 @@ In [`/docs`](docs/):
 - `design-decisions.md`: the reasoning behind the data model and API choices
 - `api-spec.yaml`: OpenAPI spec for every endpoint
 
-Reviewer copy of the Week 1 documents: <Google Drive folder link>
+Reviewer copy of the Week 1 documents: https://drive.google.com/drive/folders/1IqhGcwtNn7upJP8d1_SY8q7hoZ0yqswg?usp=sharing
 
 ## Project structure
 ```

@@ -27,7 +27,7 @@ Node/Express and MongoDB are what I know best (prior MERN experience), so the ti
 - Customers and garment types are seeded in Week 1; their endpoints come in Week 2
 
 ## Links
-Full reasoning: docs/design-decisions.md | ERD: docs/erd.png | Spec: docs/api-spec.yaml | Drive folder: <paste link>
+Full reasoning: docs/design-decisions.md | ERD: docs/erd.png | Spec: docs/api-spec.yaml | Drive folder: [(https://drive.google.com/drive/folders/1IqhGcwtNn7upJP8d1_SY8q7hoZ0yqswg?usp=sharing)](https://drive.google.com/drive/folders/1IqhGcwtNn7upJP8d1_SY8q7hoZ0yqswg?usp=sharing)
 
 ## Top 3 risks
 1. Scope creep into payments or uploads
