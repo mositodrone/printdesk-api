@@ -16,7 +16,7 @@ Authentication isn't built until Week 2, but Staff (with a `role` of `owner` or 
 
 ## 4. Required fields
 - **Customer:** `name` and `phone` are required because the shop needs a way to reach the person about an order; `email` is optional.
-- **Order:** `customerId` is required (an order without a customer is meaningless); `status` is required and starts as `received`; `dueDate` (today or later) and `notes` (max 500 characters) are optional.
+- **Order:** `customerId` is required (an order without a customer is meaningless); `status` is required and starts as `received`; `dueDate` (must be today or later when an order is created) and `notes` (max 500 characters) are optional.
 - **OrderItem:** `orderId`, `garmentTypeId`, `size`, `color` and `quantity` are required because an item can't be produced without them; `quantity` must be a positive integer; `designNote` is optional free text.
 - **GarmentType:** `name` is required; sizes and colours are lists of allowed values.
 
@@ -33,7 +33,8 @@ No payments, no file or image uploads (`designNote` is plain text only), no real
 REST paths use plural nouns (`/orders`, `/customers`). JSON fields use camelCase (`customerId`, `dueDate`). The ERD diagram uses snake_case because that's the dbdiagram.io convention; the API and Mongoose models use camelCase. MongoDB stores ids as `_id`, but the API exposes them as `id` (a Mongoose `toJSON` transform handles this) so clients never see database-specific names.
 
 ## 9. Errors and status codes
-Every error uses one JSON shape (`error.code`, `error.message`, optional `error.details`) and never includes a stack trace. A malformed id returns 400, not 404 or 500. A well-formed id that doesn't exist returns 404. A `customerId` that is well-formed but matches no customer on order creation returns 400. Delete returns 200 with the deleted id, following the brief's "200 on success".
+Every error uses one JSON shape (`error.code`, `error.message`, optional `error.details`) and never includes a stack trace. A malformed id returns 400, not 404 or 500. A well-formed id that doesn't exist returns 404. A `customerId` that is well-formed but matches no customer on order creation returns 400. Delete returns 200 with the deleted id, following the brief's "200 on success". Unknown fields in a request body are rejected with 400 instead of being ignored, and request bodies over 10 KB are rejected with 413.
 
-## 10. Health check endpoint
+## 10. Health check and root endpoints
 `GET /health` returns `{ "status": "ok" }` without touching the database. It exists for two operational reasons: free hosting tiers put the server to sleep when idle, so I can wake it before a demo or review, and a host can use it to confirm the app started. It is documented in the spec like every other endpoint and has no authentication, since it exposes no data.
+`GET /` returns a small JSON index (API name, status and endpoint paths) so the base URL shows something useful when opened in a browser. It is also in the spec.

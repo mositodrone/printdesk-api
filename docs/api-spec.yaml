@@ -12,22 +12,26 @@ info:
     - Resource IDs are 24-character MongoDB ObjectId strings, exposed as `id`.
     - A malformed ID (not 24 hex characters) returns 400, not 404 or 500.
     - Errors always use the same shape (see the Error schema). Stack traces are never returned.
+    - Request bodies over 10 KB are rejected with 413 (`PAYLOAD_TOO_LARGE`).
     - Timestamps are ISO 8601 UTC. `dueDate` is a plain date (YYYY-MM-DD).
     - All data is dummy data.
 
 servers:
   - url: http://localhost:3000
     description: Local development
-  - url: https://REPLACE-WITH-LIVE-URL.example.com
+  - url: https://printdesk-api.onrender.com
     description: Live API (free host - first request after idle may take 30-60s)
 
 tags:
   - name: Orders
     description: Create, read, update and delete shop orders, and move them through their status stages.
+  - name: System
+    description: Service status endpoints. No data and no authentication.
 
 paths:
   /:
     get:
+      tags: [System]
       summary: API root
       description: Returns the API name and its top-level endpoints, so the base URL shows something useful in a browser.
       operationId: getRoot
@@ -54,6 +58,25 @@ paths:
                       orders:
                         type: string
                         example: /orders
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: Returns 200 when the server is up. Also wakes a sleeping free-tier host.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
   /orders:
     get:
       tags: [Orders]
@@ -221,24 +244,6 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /health:
-    get:
-      summary: Health check
-      description: Returns 200 when the server is up. Also wakes a sleeping free-tier host.
-      operationId: healthCheck
-      responses:
-        '200':
-          description: Server is up.
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  status:
-                    type: string
-                    example: ok
-
-
   /orders/{id}/status:
     parameters:
       - $ref: '#/components/parameters/OrderId'
@@ -286,7 +291,7 @@ components:
   schemas:
     ObjectId:
       type: string
-      pattern: '^[a-f0-9]{24}$'
+      pattern: '^[a-fA-F0-9]{24}$'
       example: 665f1c2e8a1b2c3d4e5f6b10
 
     OrderStatus:
@@ -425,8 +430,8 @@ components:
     BadRequest:
       description: |
         Invalid input: malformed ID, missing or wrongly typed field, unknown field,
-        invalid status value, bad query parameter, or a `customerId` that does not
-        match an existing customer.
+        invalid status value, bad query parameter, a request body that is not valid JSON
+        (code `INVALID_JSON`), or a `customerId` that does not match an existing customer.
       content:
         application/json:
           schema:

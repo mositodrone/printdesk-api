@@ -9,10 +9,13 @@
 # Local: leave @baseUrl as is. Live: swap it for the deployed URL.
 # Local only: run `npm run seed` first so there is data to read.
 
-@baseUrl = http://localhost:3000
+@baseUrl = https://printdesk-api.onrender.com
 
 ###
 # ---------- SETUP (send these first) ----------
+
+### API root -> 200
+GET {{baseUrl}}/
 
 ### Health check (also wakes a sleeping free-tier server) -> 200
 GET {{baseUrl}}/health

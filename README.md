@@ -10,7 +10,9 @@ API spec and full CRUD on orders.
 Node.js, Express, MongoDB (Atlas), Mongoose, Zod
 
 ## Live API
-<url once deployed>
+https://printdesk-api.onrender.com
+
+Quick checks: [`/health`](https://printdesk-api.onrender.com/health) and [`/orders`](https://printdesk-api.onrender.com/orders).
 
 Hosted on a free tier, so the first request after a period of inactivity may take
 30-60 seconds while the server wakes up. Hitting `/health` first is the quickest way
@@ -19,6 +21,7 @@ to wake it.
 ## Endpoints (Week 1)
 | Method | Path | Purpose | Success |
 |---|---|---|---|
+| GET | `/` | API name and endpoint index | 200 |
 | GET | `/health` | Health check | 200 |
 | GET | `/orders` | List orders (filter by `status`, `customerId`; `page`, `limit`, `sort`) | 200 |
 | POST | `/orders` | Create an order for an existing customer | 201 |

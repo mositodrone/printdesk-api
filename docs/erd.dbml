@@ -1,0 +1,47 @@
+// Paste into dbdiagram.io, then export a PNG as docs/erd.png
+
+Table staff {
+  id objectid [pk]
+  name varchar [not null]
+  email varchar [unique, not null]
+  password_hash varchar [not null]
+  role varchar [not null, note: 'owner | staff']
+  created_at datetime
+}
+
+Table customers {
+  id objectid [pk]
+  name varchar [not null]
+  phone varchar [not null]
+  email varchar
+  created_at datetime
+}
+
+Table garment_types {
+  id objectid [pk]
+  name varchar [not null]
+  category varchar
+  available_sizes varchar[]
+  available_colors varchar[]
+}
+
+Table orders {
+  id objectid [pk]
+  customer_id objectid [not null, ref: > customers.id]
+  handled_by objectid [ref: > staff.id]
+  status varchar [not null, note: 'received | printing | ready | delivered | cancelled']
+  due_date date
+  notes text
+  created_at datetime
+  updated_at datetime
+}
+
+Table order_items {
+  id objectid [pk]
+  order_id objectid [not null, ref: > orders.id]
+  garment_type_id objectid [not null, ref: > garment_types.id]
+  size varchar [not null]
+  color varchar [not null]
+  quantity int [not null]
+  design_note text
+}
