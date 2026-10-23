@@ -1,0 +1,138 @@
+# Auth requests: sign-up, login, and the 401 / 400 / 409 cases.
+# Run `npm run seed` first (it creates the dummy accounts below).
+#
+# START HERE: send "loginOwner" first. Requests further down that need a token read it
+# from that response. After reloading VS Code, send it again.
+# Local: leave @baseUrl as is. Live: swap it for the deployed URL.
+
+@baseUrl = http://localhost:3000
+
+###
+# ---------- LOG IN (named, so later requests can reuse the token) ----------
+
+### loginOwner -> 200 (token + staff, no password data)
+# @name loginOwner
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@example.com",
+  "password": "owner-password-123"
+}
+
+### loginStaffOne -> 200
+# @name loginStaffOne
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "staff.one@example.com",
+  "password": "staff-password-123"
+}
+
+### loginStaffTwo -> 200
+# @name loginStaffTwo
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "staff.two@example.com",
+  "password": "staff-password-123"
+}
+
+###
+# ---------- SIGN UP ----------
+
+### Sign up a new staff account -> 201 (the email changes on every send)
+POST {{baseUrl}}/auth/signup
+Content-Type: application/json
+
+{
+  "name": "New Staff",
+  "email": "new.staff.{{$timestamp}}@example.com",
+  "password": "new-staff-password-1"
+}
+
+###
+# ---------- USING A TOKEN ----------
+
+### Protected route with a valid token -> 200
+GET {{baseUrl}}/orders?limit=1
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+###
+# ---------- FAILURE CASES ----------
+
+### Sign up with a role in the body -> 400 (nobody can pick their own role)
+POST {{baseUrl}}/auth/signup
+Content-Type: application/json
+
+{
+  "name": "Sneaky",
+  "email": "sneaky@example.com",
+  "password": "sneaky-password-1",
+  "role": "owner"
+}
+
+### Password too short -> 400
+POST {{baseUrl}}/auth/signup
+Content-Type: application/json
+
+{
+  "name": "Short Password",
+  "email": "short.password@example.com",
+  "password": "short"
+}
+
+### Invalid email -> 400
+POST {{baseUrl}}/auth/signup
+Content-Type: application/json
+
+{
+  "name": "Bad Email",
+  "email": "not-an-email",
+  "password": "long-enough-password"
+}
+
+### Email already registered -> 409 DUPLICATE_RECORD
+POST {{baseUrl}}/auth/signup
+Content-Type: application/json
+
+{
+  "name": "Duplicate",
+  "email": "staff.one@example.com",
+  "password": "long-enough-password"
+}
+
+### Wrong password -> 401 INVALID_CREDENTIALS
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@example.com",
+  "password": "not-the-password"
+}
+
+### Unknown email -> 401 INVALID_CREDENTIALS (same message as a wrong password)
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nobody@example.com",
+  "password": "whatever-password"
+}
+
+### Login with the password missing -> 400
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "owner@example.com"
+}
+
+### Protected route with no token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/orders
+
+### Protected route with a garbage token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/orders
+Authorization: Bearer this-is-not-a-real-token

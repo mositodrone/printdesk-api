@@ -1,0 +1,277 @@
+# Order item requests: add, list, delete, plus validation, ownership and cascade checks.
+# Run `npm run seed` first (dummy accounts, garment types, orders with and without items).
+#
+# START HERE, in this order:
+#   1. Send loginOwner, loginStaffOne and loginStaffTwo (each gives a token).
+#   2. Send listOrders, listDelivered, listGarments, then createOrder.
+#      createOrder is made by staff one, so staff one is its handler and can add items to it.
+#   Then work top to bottom. The last section deletes the order, so run it last.
+#   After reloading VS Code, send the setup requests again.
+#
+# listGarments is sorted by name: data[0] is the Cap, data[1] is the Hoodie
+# (Hoodie sizes: S M L XL XXL; colours: black grey navy. Cap size: One size).
+#
+# Local: leave @baseUrl as is. Live: swap it for the deployed URL.
+
+@baseUrl = http://localhost:3000
+
+###
+# ---------- LOG IN ----------
+
+### loginOwner -> 200
+# @name loginOwner
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "owner@example.com", "password": "owner-password-123" }
+
+### loginStaffOne -> 200
+# @name loginStaffOne
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "staff.one@example.com", "password": "staff-password-123" }
+
+### loginStaffTwo -> 200
+# @name loginStaffTwo
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "staff.two@example.com", "password": "staff-password-123" }
+
+###
+# ---------- SETUP ----------
+
+### listOrders -> 200 (gives a customerId and a seeded order id)
+# @name listOrders
+GET {{baseUrl}}/orders?limit=1
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### listDelivered -> 200 (the seeded delivered order has NO handler, so only owners can change it)
+# @name listDelivered
+GET {{baseUrl}}/orders?status=delivered&limit=1
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### listGarments -> 200 (the garment type ids you need when adding items)
+# @name listGarments
+GET {{baseUrl}}/garment-types
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### createOrder -> 201 (staff one becomes the handler)
+# @name createOrder
+POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "customerId": "{{listOrders.response.body.$.data[0].customerId}}",
+  "dueDate": "2030-01-15",
+  "notes": "Order for the item requests"
+}
+
+###
+# ---------- HAPPY PATHS ----------
+
+### addItem -> 201 (handler adds a Hoodie, size L, black)
+# @name addItem
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}",
+  "size": "L",
+  "color": "black",
+  "quantity": 12,
+  "designNote": "Logo on the chest, back plain"
+}
+
+### An owner can add to any order -> 201 (same Hoodie and size, different colour)
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}",
+  "size": "L",
+  "color": "navy",
+  "quantity": 4
+}
+
+### A different garment (the Cap), designNote left out -> 201 (designNote is null)
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "garmentTypeId": "{{listGarments.response.body.$.data[0].id}}",
+  "size": "One size",
+  "color": "black",
+  "quantity": 20
+}
+
+### Staff two can READ the items -> 200 (three items)
+GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+
+### Items of a seeded order -> 200
+GET {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/items
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+
+###
+# ---------- VALIDATION AND EDGE CASES ----------
+
+### Same garment, size and colour again -> 409 DUPLICATE_ITEM
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}",
+  "size": "L",
+  "color": "black",
+  "quantity": 99
+}
+
+### Garment type that does not exist -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "000000000000000000000000", "size": "L", "color": "black", "quantity": 1 }
+
+### Size the Hoodie does not offer -> 400 (the message lists the valid sizes)
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "One size", "color": "black", "quantity": 1 }
+
+### Colour the Hoodie does not offer -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "red", "quantity": 1 }
+
+### Quantity 0 -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "black", "quantity": 0 }
+
+### Quantity 1.5 -> 400 (must be a whole number)
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "black", "quantity": 1.5 }
+
+### Quantity sent as text -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "black", "quantity": "5" }
+
+### Quantity 1001 -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "black", "quantity": 1001 }
+
+### Unknown field -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "black", "quantity": 1, "price": 5000 }
+
+### Required fields missing -> 400
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "designNote": "no garment, size, colour or quantity" }
+
+###
+# ---------- OWNERSHIP ----------
+
+### Staff two cannot ADD to staff one's order -> 403 FORBIDDEN
+POST {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "grey", "quantity": 1 }
+
+### Staff two cannot DELETE an item from it -> 403 FORBIDDEN
+DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items/{{addItem.response.body.$.id}}
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+
+### Staff cannot add to a seeded order that has no handler -> 403 FORBIDDEN
+POST {{baseUrl}}/orders/{{listDelivered.response.body.$.data[0].id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "grey", "quantity": 1 }
+
+### An item id with a DIFFERENT order in the path -> 404 ITEM_NOT_FOUND (owner, so permission passes)
+DELETE {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/items/{{addItem.response.body.$.id}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+###
+# ---------- DELETE AN ITEM ----------
+
+### Handler deletes the item -> 200
+DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items/{{addItem.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Delete the same item again -> 404 ITEM_NOT_FOUND
+DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items/{{addItem.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+###
+# ---------- CASCADE: DELETING AN ORDER DELETES ITS ITEMS (run last) ----------
+
+### Handler deletes the whole order -> 200 (its two remaining items go with it)
+DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### The order's items are no longer reachable -> 404 ORDER_NOT_FOUND
+# (also check in Atlas that no orderitems document still has that orderId)
+GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+###
+# ---------- OTHER FAILURE CASES ----------
+
+### No token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/items
+
+### Garbage token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/items
+Authorization: Bearer this-is-not-a-real-token
+
+### Malformed order id -> 400
+GET {{baseUrl}}/orders/not-a-real-id/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Malformed item id -> 400
+DELETE {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/items/not-a-real-id
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### Valid order id that does not exist (list) -> 404 ORDER_NOT_FOUND
+GET {{baseUrl}}/orders/000000000000000000000000/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Valid order id that does not exist (add) -> 404 ORDER_NOT_FOUND
+POST {{baseUrl}}/orders/000000000000000000000000/items
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "garmentTypeId": "{{listGarments.response.body.$.data[1].id}}", "size": "S", "color": "black", "quantity": 1 }
+
+### Garment types need a login -> 401
+GET {{baseUrl}}/garment-types

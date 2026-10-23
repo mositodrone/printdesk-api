@@ -1,0 +1,187 @@
+# Customer requests: create, read, a customer's orders, and the owner-only delete with its 409 rule.
+# Run `npm run seed` first (dummy accounts, customers and orders).
+#
+# START HERE, in this order:
+#   1. Send loginOwner, loginStaffOne and loginStaffTwo (each gives a token).
+#   2. Send listOrders (gives the id of a seeded customer who HAS orders).
+#   3. Send createCustomer (a brand-new customer with no orders; the phone is random each time).
+#   Then work top to bottom. The delete section removes the new customer, so run it last.
+#   After reloading VS Code, send the setup requests again.
+#
+# Local: leave @baseUrl as is. Live: swap it for the deployed URL.
+
+@baseUrl = http://localhost:3000
+
+###
+# ---------- LOG IN ----------
+
+### loginOwner -> 200
+# @name loginOwner
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "owner@example.com", "password": "owner-password-123" }
+
+### loginStaffOne -> 200
+# @name loginStaffOne
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "staff.one@example.com", "password": "staff-password-123" }
+
+### loginStaffTwo -> 200
+# @name loginStaffTwo
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "staff.two@example.com", "password": "staff-password-123" }
+
+###
+# ---------- SETUP ----------
+
+### listOrders -> 200 (its customerId belongs to a customer who has orders)
+# @name listOrders
+GET {{baseUrl}}/orders?limit=1
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### createCustomer -> 201 (any logged-in staff can create customers)
+# @name createCustomer
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "name": "New Test Customer",
+  "phone": "+234{{$randomInt 800000000 899999999}}",
+  "email": "new.test.customer@example.com"
+}
+
+###
+# ---------- HAPPY PATHS ----------
+
+### Get the customer just created -> 200
+GET {{baseUrl}}/customers/{{createCustomer.response.body.$.id}}
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+
+### Email is optional -> 201 (email is null; the phone is random so this can be re-sent)
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "name": "No Email Customer",
+  "phone": "(0803) {{$randomInt 100 999}}-{{$randomInt 1000 9999}}"
+}
+
+### A new customer has no orders -> 200 (empty list, totalPages 0)
+GET {{baseUrl}}/customers/{{createCustomer.response.body.$.id}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### A seeded customer's orders -> 200 (data plus pagination)
+GET {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Paging through them -> 200 (page 1 of 2, one order per page)
+GET {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}/orders?page=1&limit=1
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+###
+# ---------- VALIDATION AND EDGE CASES ----------
+
+### Same phone number again -> 409 DUPLICATE_RECORD
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{
+  "name": "Duplicate Phone",
+  "phone": "{{createCustomer.response.body.$.phone}}"
+}
+
+### Phone with letters -> 400
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "name": "Bad Phone", "phone": "not-a-phone" }
+
+### Phone too short -> 400
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "name": "Short Phone", "phone": "12345" }
+
+### Name missing -> 400
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "phone": "+2348099999999" }
+
+### Invalid email -> 400
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "name": "Bad Email", "phone": "+2348099999998", "email": "not-an-email" }
+
+### Unknown field -> 400
+POST {{baseUrl}}/customers
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "name": "Extra Field", "phone": "+2348099999997", "vip": true }
+
+### Page 0 -> 400
+GET {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}/orders?page=0
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Query parameter this route does not support -> 400
+GET {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}/orders?sort=name
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+###
+# ---------- DELETING (owners only) ----------
+
+### Staff cannot delete a customer -> 403 FORBIDDEN
+DELETE {{baseUrl}}/customers/{{createCustomer.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Owner tries to delete a customer WHO HAS ORDERS -> 409 CUSTOMER_HAS_ORDERS (nothing is deleted)
+DELETE {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### Owner deletes the new customer, who has no orders -> 200
+DELETE {{baseUrl}}/customers/{{createCustomer.response.body.$.id}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### Delete the same customer again -> 404 CUSTOMER_NOT_FOUND
+DELETE {{baseUrl}}/customers/{{createCustomer.response.body.$.id}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### Fetch the deleted customer -> 404 CUSTOMER_NOT_FOUND
+GET {{baseUrl}}/customers/{{createCustomer.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+###
+# ---------- OTHER FAILURE CASES ----------
+
+### No token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}
+
+### Garbage token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/customers/{{listOrders.response.body.$.data[0].customerId}}
+Authorization: Bearer this-is-not-a-real-token
+
+### Malformed id -> 400
+GET {{baseUrl}}/customers/not-a-real-id
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Valid id that does not exist -> 404 CUSTOMER_NOT_FOUND
+GET {{baseUrl}}/customers/000000000000000000000000
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Orders of a customer that does not exist -> 404 CUSTOMER_NOT_FOUND
+GET {{baseUrl}}/customers/000000000000000000000000/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}

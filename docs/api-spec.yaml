@@ -2,19 +2,43 @@ openapi: 3.0.3
 
 info:
   title: PrintDesk API
-  version: 1.0.0
+  version: 2.0.0
   description: |
     REST API for tracking custom-print shop orders (T-shirts, hoodies, caps).
-    Backend Development track, BuildLab Stage 1 - Week 1 spec (Order endpoints).
+    Backend Development track, BuildLab Stage 1 - Week 2 spec. Builds on the Week 1
+    order endpoints with authentication, authorisation, order items and customers.
 
     Conventions
     - JSON only. Request and response fields use camelCase.
     - Resource IDs are 24-character MongoDB ObjectId strings, exposed as `id`.
     - A malformed ID (not 24 hex characters) returns 400, not 404 or 500.
-    - Errors always use the same shape (see the Error schema). Stack traces are never returned.
-    - Request bodies over 10 KB are rejected with 413 (`PAYLOAD_TOO_LARGE`).
     - Timestamps are ISO 8601 UTC. `dueDate` is a plain date (YYYY-MM-DD).
+    - Request bodies over 10 KB are rejected with 413 (`PAYLOAD_TOO_LARGE`).
     - All data is dummy data.
+
+    Authentication
+    - Sign up (`POST /auth/signup`) or log in (`POST /auth/login`), then send
+      `Authorization: Bearer <token>` on every request except the public ones
+      (`/`, `/health`, `/auth/signup`, `/auth/login`). Tokens expire after 1 hour.
+    - 401 means you are not logged in or the token is missing, invalid or expired.
+      403 means you are logged in but not allowed to do this.
+    - There are two roles: `owner` and `staff`. Sign-up always creates a `staff`
+      account; owners are created by the system administrator.
+
+    Permissions
+    - Any logged-in staff member can read orders, items, customers and garment types, create orders and
+      customers, and change an order's status.
+    - Editing or deleting an order, or adding or removing its items, is limited to an owner
+      or the staff member in the order's `handledBy` field (the person who created it).
+      Orders with no `handledBy` (seeded data) can be changed by owners only.
+    - Deleting a customer is limited to owners.
+
+    Errors
+    - Every error has the same shape (see the Error schema) and never includes a stack trace.
+    - Codes: `VALIDATION_ERROR`, `INVALID_JSON`, `PAYLOAD_TOO_LARGE`, `UNAUTHENTICATED`,
+      `INVALID_CREDENTIALS`, `FORBIDDEN`, `ORDER_NOT_FOUND`, `ITEM_NOT_FOUND`,
+      `CUSTOMER_NOT_FOUND`, `NOT_FOUND` (unknown route), `DUPLICATE_RECORD`,
+      `DUPLICATE_ITEM`, `CUSTOMER_HAS_ORDERS`, `INTERNAL_ERROR`.
 
 servers:
   - url: http://localhost:3000
@@ -22,11 +46,22 @@ servers:
   - url: https://printdesk-api.onrender.com
     description: Live API (free host - first request after idle may take 30-60s)
 
+security:
+  - bearerAuth: []
+
 tags:
-  - name: Orders
-    description: Create, read, update and delete shop orders, and move them through their status stages.
   - name: System
     description: Service status endpoints. No data and no authentication.
+  - name: Auth
+    description: Sign up and log in.
+  - name: Orders
+    description: Create, read, update and delete shop orders, and move them through their status stages.
+  - name: Order items
+    description: The garments (type, size, colour, quantity) that make up an order.
+  - name: Garment types
+    description: Read-only catalog of the garments the shop prints on.
+  - name: Customers
+    description: People the shop makes orders for.
 
 paths:
   /:
@@ -35,6 +70,7 @@ paths:
       summary: API root
       description: Returns the API name and its top-level endpoints, so the base URL shows something useful in a browser.
       operationId: getRoot
+      security: []
       responses:
         '200':
           description: API is up.
@@ -65,6 +101,7 @@ paths:
       summary: Health check
       description: Returns 200 when the server is up. Also wakes a sleeping free-tier host.
       operationId: healthCheck
+      security: []
       responses:
         '200':
           description: Server is up.
@@ -76,6 +113,79 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  /auth/signup:
+    post:
+      tags: [Auth]
+      summary: Sign up
+      description: |
+        Creates a staff account. The role is always `staff`; a `role` field in the body is
+        rejected with 400. The password is stored only as a bcrypt hash and is never returned.
+      operationId: signup
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignupRequest'
+            example:
+              name: Test Staff
+              email: staff.one@example.com
+              password: staff-password-123
+      responses:
+        '201':
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Staff'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in
+      description: |
+        Returns a token valid for 1 hour. A wrong email and a wrong password return the
+        same 401 response, so the API does not reveal which emails are registered.
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: owner@example.com
+              password: owner-password-123
+      responses:
+        '200':
+          description: Logged in.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          description: Email or password is wrong.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: INVALID_CREDENTIALS
+                  message: Invalid email or password
+        '500':
+          $ref: '#/components/responses/ServerError'
 
   /orders:
     get:
@@ -94,21 +204,8 @@ paths:
           description: Only return orders for this customer.
           schema:
             $ref: '#/components/schemas/ObjectId'
-        - name: page
-          in: query
-          description: Page number, starting at 1.
-          schema:
-            type: integer
-            minimum: 1
-            default: 1
-        - name: limit
-          in: query
-          description: Orders per page.
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
         - name: sort
           in: query
           description: Sort field. Prefix with `-` for descending.
@@ -125,6 +222,8 @@ paths:
                 $ref: '#/components/schemas/OrderList'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -132,9 +231,9 @@ paths:
       tags: [Orders]
       summary: Create an order
       description: |
-        Creates an order for an existing customer. `status` is always set to
-        `received` on creation. If `customerId` is well-formed but does not match
-        an existing customer, the response is 400.
+        Creates an order for an existing customer. `status` is always set to `received`
+        and `handledBy` is set to the logged-in staff member. If `customerId` is
+        well-formed but does not match an existing customer, the response is 400.
       operationId: createOrder
       requestBody:
         required: true
@@ -161,6 +260,8 @@ paths:
                 $ref: '#/components/schemas/Order'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -181,6 +282,8 @@ paths:
                 $ref: '#/components/schemas/Order'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -192,6 +295,7 @@ paths:
       description: |
         Partial update. Send only the fields you want to change; at least one is required.
         `status` cannot be changed here, use `PATCH /orders/{id}/status`.
+        Allowed for owners and for the staff member in `handledBy`; anyone else gets 403.
       operationId: updateOrder
       requestBody:
         required: true
@@ -211,6 +315,10 @@ paths:
                 $ref: '#/components/schemas/Order'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -220,25 +328,22 @@ paths:
       tags: [Orders]
       summary: Delete an order
       description: |
-        Permanently deletes the order. Returns 200 with the deleted order's ID so
-        the client can confirm what was removed.
+        Permanently deletes the order and all of its items. Returns 200 with the deleted
+        order's ID. Allowed for owners and for the staff member in `handledBy`.
       operationId: deleteOrder
       responses:
         '200':
-          description: Order deleted.
+          description: Order and its items deleted.
           content:
             application/json:
               schema:
-                type: object
-                required: [message, id]
-                properties:
-                  message:
-                    type: string
-                    example: Order deleted
-                  id:
-                    $ref: '#/components/schemas/ObjectId'
+                $ref: '#/components/schemas/DeleteResult'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -252,9 +357,9 @@ paths:
       tags: [Orders]
       summary: Change an order's status
       description: |
-        Moves an order to a new status. This is a separate endpoint from
-        `PATCH /orders/{id}` so that, once roles exist (Week 2), staff can be allowed
-        to update status without being allowed to edit other order details.
+        Moves an order to a new status. Any logged-in staff member can do this, so a shift
+        can move along an order that someone else created. It is a separate endpoint from
+        `PATCH /orders/{id}` so that status changes can be allowed without allowing other edits.
       operationId: updateOrderStatus
       requestBody:
         required: true
@@ -273,12 +378,250 @@ paths:
                 $ref: '#/components/schemas/Order'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /orders/{id}/items:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+
+    get:
+      tags: [Order items]
+      summary: List an order's items
+      operationId: listOrderItems
+      responses:
+        '200':
+          description: Items found (an order with no items returns an empty list).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    post:
+      tags: [Order items]
+      summary: Add an item to an order
+      description: |
+        Adds a garment line to the order. The garment type must exist, and the `size` and
+        `color` must be ones that garment type offers (otherwise 400). Adding the same
+        garment, size and colour twice to one order returns 409; update the quantity instead.
+        Get garment type ids, and the sizes and colours each offers, from `GET /garment-types`.
+        Allowed for owners and for the staff member in `handledBy`.
+      operationId: addOrderItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderItemCreate'
+            example:
+              garmentTypeId: 665f1c2e8a1b2c3d4e5f6c01
+              size: L
+              color: black
+              quantity: 12
+              designNote: Logo on the chest, back plain
+      responses:
+        '201':
+          description: Item added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /orders/{id}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+      - $ref: '#/components/parameters/ItemId'
+
+    delete:
+      tags: [Order items]
+      summary: Remove an item from an order
+      description: |
+        The item must belong to the order in the path, otherwise 404.
+        Allowed for owners and for the staff member in `handledBy`.
+      operationId: deleteOrderItem
+      responses:
+        '200':
+          description: Item deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /garment-types:
+    get:
+      tags: [Garment types]
+      summary: List garment types
+      description: |
+        Read-only catalog of the garments the shop prints on, sorted by name, with the sizes
+        and colours each one offers. Use these ids when adding order items. Garment types
+        cannot be created, changed or deleted through the API.
+      operationId: listGarmentTypes
+      responses:
+        '200':
+          description: Garment types found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GarmentTypeList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /customers:
+    post:
+      tags: [Customers]
+      summary: Create a customer
+      description: The phone number must be unique; a duplicate returns 409.
+      operationId: createCustomer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerCreate'
+            example:
+              name: Test Customer Five
+              phone: '+2340000000005'
+              email: customer.five@example.com
+      responses:
+        '201':
+          description: Customer created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /customers/{id}:
+    parameters:
+      - $ref: '#/components/parameters/CustomerId'
+
+    get:
+      tags: [Customers]
+      summary: Get one customer
+      operationId: getCustomer
+      responses:
+        '200':
+          description: Customer found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+    delete:
+      tags: [Customers]
+      summary: Delete a customer
+      description: |
+        Owners only. A customer who still has orders cannot be deleted (409), so order
+        history is never lost; delete or reassign their orders first.
+        The role is checked first, so a non-owner gets 403 whether or not the customer exists.
+      operationId: deleteCustomer
+      responses:
+        '200':
+          description: Customer deleted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /customers/{id}/orders:
+    parameters:
+      - $ref: '#/components/parameters/CustomerId'
+
+    get:
+      tags: [Customers]
+      summary: List a customer's orders
+      description: Same response shape as `GET /orders`, limited to this customer.
+      operationId: listCustomerOrders
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Orders found (a customer with no orders returns an empty list).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/ServerError'
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token returned by `POST /auth/login`. Valid for 1 hour.
+
   parameters:
     OrderId:
       name: id
@@ -287,6 +630,37 @@ components:
       description: The order's ID (24-character hex string).
       schema:
         $ref: '#/components/schemas/ObjectId'
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      description: The order item's ID (24-character hex string).
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+    CustomerId:
+      name: id
+      in: path
+      required: true
+      description: The customer's ID (24-character hex string).
+      schema:
+        $ref: '#/components/schemas/ObjectId'
+    Page:
+      name: page
+      in: query
+      description: Page number, starting at 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      description: Records per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
 
   schemas:
     ObjectId:
@@ -298,6 +672,77 @@ components:
       type: string
       enum: [received, printing, ready, delivered, cancelled]
 
+    Staff:
+      type: object
+      required: [id, name, email, role, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
+        name:
+          type: string
+          example: Test Staff
+        email:
+          type: string
+          format: email
+          example: staff.one@example.com
+        role:
+          type: string
+          enum: [owner, staff]
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+
+    SignupRequest:
+      type: object
+      required: [name, email, password]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 8
+          maxLength: 72
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          format: password
+          writeOnly: true
+          minLength: 1
+          maxLength: 72
+
+    LoginResponse:
+      type: object
+      required: [token, staff]
+      properties:
+        token:
+          type: string
+          description: 'Send as `Authorization: Bearer <token>`.'
+        staff:
+          $ref: '#/components/schemas/Staff'
+
     Order:
       type: object
       required: [id, customerId, status, createdAt, updatedAt]
@@ -307,7 +752,7 @@ components:
         customerId:
           $ref: '#/components/schemas/ObjectId'
         handledBy:
-          description: Staff member who handled the order. Null until staff auth exists (Week 2).
+          description: The staff member who created the order. Null for seeded orders.
           allOf:
             - $ref: '#/components/schemas/ObjectId'
           nullable: true
@@ -397,6 +842,171 @@ components:
               type: integer
               example: 3
 
+    OrderItem:
+      type: object
+      required: [id, orderId, garmentTypeId, size, color, quantity, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
+        orderId:
+          $ref: '#/components/schemas/ObjectId'
+        garmentTypeId:
+          $ref: '#/components/schemas/ObjectId'
+        size:
+          type: string
+          example: L
+        color:
+          type: string
+          example: black
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          example: 12
+        designNote:
+          type: string
+          maxLength: 300
+          nullable: true
+          example: Logo on the chest, back plain
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+
+    OrderItemCreate:
+      type: object
+      required: [garmentTypeId, size, color, quantity]
+      additionalProperties: false
+      properties:
+        garmentTypeId:
+          $ref: '#/components/schemas/ObjectId'
+        size:
+          type: string
+          minLength: 1
+          maxLength: 30
+          description: Must be one of the garment type's available sizes.
+        color:
+          type: string
+          minLength: 1
+          maxLength: 30
+          description: Must be one of the garment type's available colours.
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        designNote:
+          type: string
+          maxLength: 300
+          description: Plain text only. No file uploads.
+
+    ItemList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    GarmentType:
+      type: object
+      required: [id, name, availableSizes, availableColors]
+      properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
+        name:
+          type: string
+          example: Hoodie
+        category:
+          type: string
+          nullable: true
+          example: tops
+        availableSizes:
+          type: array
+          items:
+            type: string
+          example: [S, M, L, XL, XXL]
+        availableColors:
+          type: array
+          items:
+            type: string
+          example: [black, grey, navy]
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+
+    GarmentTypeList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/GarmentType'
+
+    Customer:
+      type: object
+      required: [id, name, phone, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/ObjectId'
+        name:
+          type: string
+          example: Test Customer Five
+        phone:
+          type: string
+          example: '+2340000000005'
+        email:
+          type: string
+          format: email
+          nullable: true
+          example: customer.five@example.com
+        createdAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+        updatedAt:
+          type: string
+          format: date-time
+          example: '2026-10-18T09:30:00.000Z'
+
+    CustomerCreate:
+      type: object
+      required: [name, phone]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        phone:
+          type: string
+          pattern: '^\+?[0-9 ()-]{7,20}$'
+          description: Digits with an optional leading +, spaces, brackets and dashes. Must be unique.
+        email:
+          type: string
+          format: email
+          maxLength: 254
+
+    DeleteResult:
+      type: object
+      required: [message, id]
+      properties:
+        message:
+          type: string
+          example: Order deleted
+        id:
+          $ref: '#/components/schemas/ObjectId'
+
     Error:
       type: object
       required: [error]
@@ -407,7 +1017,7 @@ components:
           properties:
             code:
               type: string
-              description: Stable, machine-readable error code.
+              description: Stable, machine-readable error code (see the list in the API description).
               example: VALIDATION_ERROR
             message:
               type: string
@@ -415,7 +1025,7 @@ components:
               example: Request body is invalid
             details:
               type: array
-              description: Field-level problems, present for validation errors.
+              description: Field-level problems, present for validation and duplicate errors.
               items:
                 type: object
                 properties:
@@ -431,7 +1041,8 @@ components:
       description: |
         Invalid input: malformed ID, missing or wrongly typed field, unknown field,
         invalid status value, bad query parameter, a request body that is not valid JSON
-        (code `INVALID_JSON`), or a `customerId` that does not match an existing customer.
+        (code `INVALID_JSON`), a reference to a record that does not exist (for example
+        a `customerId` or `garmentTypeId`), or a size or colour the garment does not offer.
       content:
         application/json:
           schema:
@@ -444,8 +1055,33 @@ components:
                 - field: customerId
                   issue: customerId is required
 
+    Unauthorized:
+      description: Not logged in, or the token is missing, malformed, invalid or expired.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNAUTHENTICATED
+              message: Invalid or expired token
+
+    Forbidden:
+      description: Logged in, but not allowed to do this (not an owner, or not the order's handler).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FORBIDDEN
+              message: You do not have permission to do this
+
     NotFound:
-      description: No order exists with that ID.
+      description: |
+        The order, item or customer does not exist (codes `ORDER_NOT_FOUND`,
+        `ITEM_NOT_FOUND` or `CUSTOMER_NOT_FOUND`). An item that exists but belongs to a
+        different order is also reported as not found.
       content:
         application/json:
           schema:
@@ -454,6 +1090,38 @@ components:
             error:
               code: ORDER_NOT_FOUND
               message: Order not found
+
+    Conflict:
+      description: |
+        The request clashes with existing data: a duplicate unique value (`DUPLICATE_RECORD`,
+        for example an email or phone number already in use), a duplicate item on an order
+        (`DUPLICATE_ITEM`), or a customer who still has orders (`CUSTOMER_HAS_ORDERS`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            duplicateRecord:
+              summary: Email or phone already in use
+              value:
+                error:
+                  code: DUPLICATE_RECORD
+                  message: A record with this email already exists
+                  details:
+                    - field: email
+                      issue: must be unique
+            duplicateItem:
+              summary: Same garment, size and colour already on the order
+              value:
+                error:
+                  code: DUPLICATE_ITEM
+                  message: This order already has an item with the same garment, size and colour
+            customerHasOrders:
+              summary: Customer still has orders
+              value:
+                error:
+                  code: CUSTOMER_HAS_ORDERS
+                  message: Customer still has orders and cannot be deleted
 
     ServerError:
       description: Unexpected server error. No stack trace or internal detail is returned.

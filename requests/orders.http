@@ -1,38 +1,63 @@
-# PrintDesk API: sample requests (REST Client extension for VS Code)
+# Order requests with authentication and ownership checks.
+# Run `npm run seed` first (dummy accounts, plus orders that have and lack a handler).
 #
-# START HERE:
-#   1. Send "listOrders" first (below). Other requests read ids from its response.
-#   2. Then send "createOrder". The get / update / status / delete requests use the
-#      order it creates, so the seeded data is never touched.
-#   3. Work top to bottom. After reloading VS Code, send both again.
+# START HERE, in this order:
+#   1. Send loginOwner, loginStaffOne and loginStaffTwo (each gives a token).
+#   2. Send listOrders and listDelivered (read an id from each).
+#   3. Send createOrder (it is created by staff one, who becomes its handler).
+#   Then work top to bottom. After reloading VS Code, send the setup requests again.
 #
 # Local: leave @baseUrl as is. Live: swap it for the deployed URL.
-# Local only: run `npm run seed` first so there is data to read.
 
-@baseUrl = https://printdesk-api.onrender.com
+@baseUrl = http://localhost:3000
 
 ###
-# ---------- SETUP (send these first) ----------
+# ---------- LOG IN (one token per person) ----------
 
-### API root -> 200
-GET {{baseUrl}}/
+### loginOwner -> 200
+# @name loginOwner
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
 
-### Health check (also wakes a sleeping free-tier server) -> 200
+{ "email": "owner@example.com", "password": "owner-password-123" }
+
+### loginStaffOne -> 200
+# @name loginStaffOne
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "staff.one@example.com", "password": "staff-password-123" }
+
+### loginStaffTwo -> 200
+# @name loginStaffTwo
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "staff.two@example.com", "password": "staff-password-123" }
+
+###
+# ---------- SETUP ----------
+
+### Health check (public) -> 200
 GET {{baseUrl}}/health
 
-### listOrders -> 200 (newest first; provides a customerId for later requests)
+### listOrders -> 200 (gives a customerId for later requests)
 # @name listOrders
 GET {{baseUrl}}/orders?limit=1
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+
+### listDelivered -> 200 (the seeded delivered order has NO handler, so only owners can change it)
+# @name listDelivered
+GET {{baseUrl}}/orders?status=delivered&limit=1
+Authorization: Bearer {{loginOwner.response.body.$.token}}
 
 ###
-# ---------- HAPPY PATHS ----------
+# ---------- HAPPY PATHS (as staff one, the handler) ----------
 
-### List orders with filters, sorting and paging -> 200
-GET {{baseUrl}}/orders?status=printing&sort=dueDate&page=1&limit=5
-
-### createOrder -> 201 (note the Location header and status "received")
+### createOrder -> 201 (handledBy is staff one's id, status is "received")
 # @name createOrder
 POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
 {
@@ -43,94 +68,160 @@ Content-Type: application/json
 
 ### Get the order just created -> 200
 GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 
-### Update its details -> 200
+### Handler edits their own order -> 200
 PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "dueDate": "2030-02-01",
-  "notes": "Due date moved back by customer"
-}
+{ "dueDate": "2030-02-01", "notes": "Due date moved back by customer" }
 
-### Change its status -> 200
+### Handler changes status -> 200
 PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/status
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "status": "printing"
-}
+{ "status": "printing" }
 
-### Filter by that status -> 200 (the order should appear)
-GET {{baseUrl}}/orders?status=printing
+### List with filters, sorting and paging -> 200
+GET {{baseUrl}}/orders?status=printing&sort=dueDate&page=1&limit=5
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 
-### Delete the order just created -> 200
+###
+# ---------- OWNERSHIP (the order above belongs to staff one) ----------
+
+### Staff two can READ it -> 200
+GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+
+### Staff two cannot EDIT it -> 403 FORBIDDEN
+PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+Content-Type: application/json
+
+{ "notes": "Staff two should not be able to do this" }
+
+### Staff two CAN change its status -> 200 (status is open to any staff)
+PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}/status
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+Content-Type: application/json
+
+{ "status": "ready" }
+
+### The owner can edit any order -> 200
+PATCH {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+Content-Type: application/json
+
+{ "notes": "Edited by the owner" }
+
+### Staff two cannot DELETE it -> 403 FORBIDDEN
 DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffTwo.response.body.$.token}}
+
+### Staff cannot edit a seeded order that has no handler -> 403 FORBIDDEN
+PATCH {{baseUrl}}/orders/{{listDelivered.response.body.$.data[0].id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "notes": "Staff should not be able to do this" }
+
+### The owner can edit that same order -> 200
+PATCH {{baseUrl}}/orders/{{listDelivered.response.body.$.data[0].id}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
+Content-Type: application/json
+
+{ "notes": "Edited by the owner" }
+
+###
+# ---------- DELETE (as the handler) ----------
+
+### Handler deletes their own order -> 200
+DELETE {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Fetch the same order again -> 404 (proves the delete worked; needs createOrder sent first)
+GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 
 ###
 # ---------- FAILURE CASES ----------
 
-### Order that no longer exists (deleted above) -> 404
-GET {{baseUrl}}/orders/{{createOrder.response.body.$.id}}
+### No token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/orders
 
-### Valid id that does not exist -> 404
-GET {{baseUrl}}/orders/000000000000000000000000
+### Garbage token -> 401 UNAUTHENTICATED
+GET {{baseUrl}}/orders
+Authorization: Bearer this-is-not-a-real-token
 
 ### Malformed id -> 400
 GET {{baseUrl}}/orders/not-a-real-id
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Valid id that does not exist -> 404 ORDER_NOT_FOUND
+GET {{baseUrl}}/orders/000000000000000000000000
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+
+### Edit an order that does not exist -> 404 (not 403)
+PATCH {{baseUrl}}/orders/000000000000000000000000
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "notes": "x" }
 
 ### Missing required customerId -> 400
 POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "notes": "no customer"
-}
+{ "notes": "no customer" }
 
 ### customerId that matches no customer -> 400
 POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "customerId": "000000000000000000000000"
-}
+{ "customerId": "000000000000000000000000" }
 
 ### Unknown field -> 400
 POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "customerId": "{{listOrders.response.body.$.data[0].customerId}}",
-  "priority": "high"
-}
+{ "customerId": "{{listOrders.response.body.$.data[0].customerId}}", "priority": "high" }
+
+### Trying to set handledBy in the body -> 400 (it always comes from the token)
+POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
+Content-Type: application/json
+
+{ "customerId": "{{listOrders.response.body.$.data[0].customerId}}", "handledBy": "000000000000000000000000" }
 
 ### Due date in the past -> 400
 POST {{baseUrl}}/orders
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "customerId": "{{listOrders.response.body.$.data[0].customerId}}",
-  "dueDate": "2020-01-01"
-}
+{ "customerId": "{{listOrders.response.body.$.data[0].customerId}}", "dueDate": "2020-01-01" }
 
 ### Invalid status value -> 400
 PATCH {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}/status
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "status": "shipped"
-}
+{ "status": "shipped" }
 
-### Status cannot be changed through the details endpoint -> 400
+### Status cannot be changed through the details endpoint -> 400 (owner, so permission passes)
 PATCH {{baseUrl}}/orders/{{listOrders.response.body.$.data[0].id}}
+Authorization: Bearer {{loginOwner.response.body.$.token}}
 Content-Type: application/json
 
-{
-  "status": "ready"
-}
+{ "status": "ready" }
 
 ### Bad query parameters -> 400
 GET {{baseUrl}}/orders?status=shipped&limit=500
+Authorization: Bearer {{loginStaffOne.response.body.$.token}}
 
 ### Unknown route -> 404
 GET {{baseUrl}}/nope
