@@ -19,6 +19,50 @@ Hosted on a free tier, so the first request after a period of inactivity may tak
 30-60 seconds while the server wakes up. Hitting `/health` first is the quickest way
 to wake it.
 
+## Run locally
+Requires Node 20+ and a MongoDB database (a free Atlas cluster works, or a local MongoDB).
+
+1. `git clone https://github.com/mositodrone/printdesk-api.git && cd printdesk-api`
+2. `npm install`
+3. `cp .env.example .env` and fill in the values below
+4. `npm run seed` (loads dummy customers, garment types, staff accounts and orders)
+5. `npm run dev`
+
+The API runs at http://localhost:3000
+
+| Variable | Purpose | Example |
+|---|---|---|
+| `MONGODB_URI` | MongoDB connection string (required) | `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/printdesk` |
+| `JWT_SECRET` | Secret used to sign tokens, at least 32 characters (required) | generate with `node -p "require('crypto').randomBytes(48).toString('hex')"` |
+| `JWT_EXPIRES_IN` | Token lifetime | `1h` |
+| `PORT` | Port to listen on | `3000` |
+| `NODE_ENV` | `development` or `production` | `development` |
+
+| Script | What it does |
+|---|---|
+| `npm run dev` | Start with auto-reload |
+| `npm start` | Start normally |
+| `npm run seed` | Wipe and reload dummy data (refuses to run with `NODE_ENV=production` unless `--force` is passed) |
+
+All data is dummy data. No real personal information or real passwords are stored.
+
+## Try the API
+Sample requests are in [`requests/`](requests/): `auth.http`, `orders.http`,
+`order-items.http` and `customers.http`. Open them in VS Code with the **REST Client**
+extension and click "Send Request" above any request. Each request is labelled with the
+status code it should return, including failure cases.
+
+Each file starts with named login requests (owner, staff one, staff two). Send the one
+for the account you want to act as before anything else; the requests below it use its
+token. After reloading VS Code, send the login again. To see ownership checks, create an
+order as staff one, then try to edit it as staff two (expect 403).
+
+- **Local:** keep `@baseUrl` as `http://localhost:3000` (run `npm run seed` first).
+- **Live:** change `@baseUrl` at the top of the file to the live URL above.
+
+The same requests also work with curl or Postman (Postman can import `docs/api-spec.yaml` directly).
+
+
 ## Authentication
 Sign up or log in to get a token, then send it as `Authorization: Bearer <token>`.
 Tokens expire after 1 hour. Public routes: `/`, `/health`, `/auth/signup`, `/auth/login`.
@@ -93,48 +137,6 @@ Every error uses one shape and never includes a stack trace:
 | 413 | `PAYLOAD_TOO_LARGE` | Body over 10 KB |
 | 500 | `INTERNAL_ERROR` | Unexpected error (details only in server logs) |
 
-## Run locally
-Requires Node 20+ and a MongoDB database (a free Atlas cluster works, or a local MongoDB).
-
-1. `git clone https://github.com/mositodrone/printdesk-api.git && cd printdesk-api`
-2. `npm install`
-3. `cp .env.example .env` and fill in the values below
-4. `npm run seed` (loads dummy customers, garment types, staff accounts and orders)
-5. `npm run dev`
-
-The API runs at http://localhost:3000
-
-| Variable | Purpose | Example |
-|---|---|---|
-| `MONGODB_URI` | MongoDB connection string (required) | `mongodb+srv://<user>:<password>@<cluster>.mongodb.net/printdesk` |
-| `JWT_SECRET` | Secret used to sign tokens, at least 32 characters (required) | generate with `node -p "require('crypto').randomBytes(48).toString('hex')"` |
-| `JWT_EXPIRES_IN` | Token lifetime | `1h` |
-| `PORT` | Port to listen on | `3000` |
-| `NODE_ENV` | `development` or `production` | `development` |
-
-| Script | What it does |
-|---|---|
-| `npm run dev` | Start with auto-reload |
-| `npm start` | Start normally |
-| `npm run seed` | Wipe and reload dummy data (refuses to run with `NODE_ENV=production` unless `--force` is passed) |
-
-All data is dummy data. No real personal information or real passwords are stored.
-
-## Try the API
-Sample requests are in [`requests/`](requests/): `auth.http`, `orders.http`,
-`order-items.http` and `customers.http`. Open them in VS Code with the **REST Client**
-extension and click "Send Request" above any request. Each request is labelled with the
-status code it should return, including failure cases.
-
-Each file starts with named login requests (owner, staff one, staff two). Send the one
-for the account you want to act as before anything else; the requests below it use its
-token. After reloading VS Code, send the login again. To see ownership checks, create an
-order as staff one, then try to edit it as staff two (expect 403).
-
-- **Local:** keep `@baseUrl` as `http://localhost:3000` (run `npm run seed` first).
-- **Live:** change `@baseUrl` at the top of the file to the live URL above.
-
-The same requests also work with curl or Postman (Postman can import `docs/api-spec.yaml` directly).
 
 ## Docs
 In [`/docs`](docs/):
@@ -146,7 +148,6 @@ In [`/docs`](docs/):
 - `feedback-response.md`: Week 1 mentor feedback and what I changed
 
 Reviewer copies: Week 1 documents: https://drive.google.com/drive/folders/1IqhGcwtNn7upJP8d1_SY8q7hoZ0yqswg?usp=sharing |
-Week 2 documents: <Week 2 Drive folder link>
 
 ## Issue log
 Problems found while building, the options I considered and how I fixed them. Entries
@@ -183,7 +184,98 @@ src/
     garmentTypes.js  read-only garment catalog
 ```
 
+## Testing
+Run everything with one command:
+
+```bash
+npm test
+```
+
+The suite has 160 tests: 53 unit tests and 107 integration tests that call the real app through HTTP against a
+throwaway in-memory MongoDB (it never touches Atlas). The first run downloads a MongoDB binary, so it needs an
+internet connection once. `npm run coverage` prints a coverage table. What is tested, what is not, and why:
+see [`docs/testing.md`](docs/testing.md).
+
 To follow a request: `app.js` -> the file in `routes/` -> the checks it lists (`auth.js`, `validate.js`) -> `models.js`.
+
+# Security changes: CORS, rate limiting, and the tests for them
+
+## 1. Install
+
+```bash
+npm i express-rate-limit cors
+```
+
+## 2. Where each file goes (project root = next to `app.js`)
+
+| File | Action |
+| --- | --- |
+| `app.js` | replace |
+| `config.js` | replace |
+| `rateLimit.js` | new |
+| `vitest.config.js` | replace |
+| `test/security.test.js` | new |
+
+## 3. New environment variables
+
+All are optional. The defaults are what you want for now.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CORS_ORIGINS` | empty | Comma-separated browser origins allowed to read responses. Empty = none. Format: `https://app.example.com` (no path, no trailing slash, no `*`) |
+| `TRUST_PROXY` | `0` | Number of proxies in front of the app. **Set to `1` on Render.** |
+| `LOGIN_RATE_LIMIT_MAX` | `10` | Failed login attempts allowed per window, per IP |
+| `LOGIN_RATE_LIMIT_WINDOW_MINUTES` | `15` | |
+| `SIGNUP_RATE_LIMIT_MAX` | `5` | Signup attempts allowed per window, per IP |
+| `SIGNUP_RATE_LIMIT_WINDOW_MINUTES` | `60` | |
+
+On Render, set `TRUST_PROXY=1` and leave `CORS_ORIGINS` unset for now. When your frontend exists, set
+`CORS_ORIGINS=https://your-frontend-address` (several: separate with commas). No code change is needed.
+
+Assumption to check once on Render: that exactly one proxy sits in front of your app. If limits seem to apply to
+everyone at once, log `req.ip` from `/health` and see whether it is your own address or a Render internal one.
+
+## 4. OpenAPI spec additions
+
+Add under `components.responses`:
+
+```yaml
+    TooManyRequests:
+      description: Too many attempts from this IP address. Wait for the time in the Retry-After header.
+      headers:
+        Retry-After:
+          description: Seconds to wait before trying again.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Too many attempts. Please wait and try again.
+```
+
+Add this line to the `responses` of both `POST /auth/signup` and `POST /auth/login`:
+
+```yaml
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+```
+
+And add `RATE_LIMITED` to the list of codes in the `Errors` part of the API description.
+
+## 5. What the new tests prove
+
+- **Input sanitisation:** operator objects (`{ "$ne": null }`) in a login, a customer name, a customerId, and in
+  query strings (`?status[$ne]=x`) are all refused with 400, and nothing is saved.
+- **CORS:** a request without an `Origin` works and gets no CORS headers. The allowed origin gets itself echoed back
+  (never `*`). Any other origin gets no headers. Preflight answers with the allowed methods, headers and cache time.
+  Cookies are not allowed cross-origin.
+- **Rate limiting:** the limit is enforced with a 429 `RATE_LIMITED` and a `Retry-After` header. A locked-out visitor
+  is refused even with the right password. Successful logins do not use up the allowance. Limits are per visitor, and
+  separate for login and signup. The rest of the API keeps working for a locked-out visitor.
 
 ## Roadmap
 - **Week 1:** data model, API spec, CRUD on orders (tag: `week-1`)

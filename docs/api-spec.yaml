@@ -25,6 +25,23 @@ info:
     - There are two roles: `owner` and `staff`. Sign-up always creates a `staff`
       account; owners are created by the system administrator.
 
+    Rate limits
+    - `POST /auth/login` allows 10 failed attempts per IP address per 15 minutes
+      (successful logins are not counted). `POST /auth/signup` allows 5 attempts per IP
+      address per hour. Over the limit the API answers 429 (`RATE_LIMITED`) with a
+      `Retry-After` header (seconds). Other routes are not rate limited.
+
+    Trying it in Swagger UI (the /docs page)
+    1. Open `POST /auth/login`, click **Try it out**, then **Execute** (the example body
+       is the seeded owner account; run `npm run seed` first).
+    2. Copy the value of `token` from the response body (only the long text, without quotes).
+    3. Click the green **Authorize** button at the top of the page, paste the token into
+       the **Value** box (do not type "Bearer ", the page adds it), click **Authorize**, then **Close**.
+    4. Every request you send from this page now carries the token. The padlock icons
+       turn closed. Tokens last 1 hour: when you start getting 401, repeat steps 1 to 3.
+    5. Ids in the examples are made up. Use real ones: `GET /orders` and
+       `GET /garment-types` return ids you can copy into later requests.
+
     Permissions
     - Any logged-in staff member can read orders, items, customers and garment types, create orders and
       customers, and change an order's status.
@@ -38,7 +55,7 @@ info:
     - Codes: `VALIDATION_ERROR`, `INVALID_JSON`, `PAYLOAD_TOO_LARGE`, `UNAUTHENTICATED`,
       `INVALID_CREDENTIALS`, `FORBIDDEN`, `ORDER_NOT_FOUND`, `ITEM_NOT_FOUND`,
       `CUSTOMER_NOT_FOUND`, `NOT_FOUND` (unknown route), `DUPLICATE_RECORD`,
-      `DUPLICATE_ITEM`, `CUSTOMER_HAS_ORDERS`, `INTERNAL_ERROR`.
+      `DUPLICATE_ITEM`, `CUSTOMER_HAS_ORDERS`, `RATE_LIMITED`, `INTERNAL_ERROR`.
 
 servers:
   - url: http://localhost:3000
@@ -144,6 +161,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -184,6 +203,8 @@ paths:
                 error:
                   code: INVALID_CREDENTIALS
                   message: Invalid email or password
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -243,7 +264,7 @@ paths:
               $ref: '#/components/schemas/OrderCreate'
             example:
               customerId: 665f1c2e8a1b2c3d4e5f6a01
-              dueDate: '2026-11-05'
+              dueDate: '2027-03-05'
               notes: Church group event, needs matching colours
       responses:
         '201':
@@ -304,7 +325,7 @@ paths:
             schema:
               $ref: '#/components/schemas/OrderUpdate'
             example:
-              dueDate: '2026-11-10'
+              dueDate: '2027-03-10'
               notes: Due date moved back by customer
       responses:
         '200':
@@ -620,7 +641,8 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Token returned by `POST /auth/login`. Valid for 1 hour.
+      description: |
+        Paste only the token returned by `POST /auth/login` (no "Bearer " prefix; Swagger UI adds it). Valid for 1 hour.
 
   parameters:
     OrderId:
@@ -762,7 +784,7 @@ components:
           type: string
           format: date
           nullable: true
-          example: '2026-11-05'
+          example: '2027-03-05'
         notes:
           type: string
           maxLength: 500
@@ -1037,6 +1059,22 @@ components:
                     example: customerId is required
 
   responses:
+    TooManyRequests:
+      description: Too many attempts from this IP address. Wait for the time in the Retry-After header.
+      headers:
+        Retry-After:
+          description: Seconds to wait before trying again.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Too many attempts. Please wait and try again.
+
     BadRequest:
       description: |
         Invalid input: malformed ID, missing or wrongly typed field, unknown field,
