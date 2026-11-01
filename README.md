@@ -12,7 +12,7 @@ Node.js, Express, MongoDB (Atlas), Mongoose, Zod, bcryptjs, JSON Web Tokens
 ## Live API
 https://printdesk-api-3.onrender.com
 
-## End Point
+## Swagger End Points
 https://printdesk-api-3.onrender.com/docs
 
 Quick checks: [`/health`](https://printdesk-api.onrender.com/health) (public). Everything
