@@ -10,7 +10,10 @@ authorisation, order items and customers, on top of the Week 1 order endpoints.
 Node.js, Express, MongoDB (Atlas), Mongoose, Zod, bcryptjs, JSON Web Tokens
 
 ## Live API
-https://printdesk-api.onrender.com
+https://printdesk-api-3.onrender.com
+
+## End Point
+https://printdesk-api-3.onrender.com/docs
 
 Quick checks: [`/health`](https://printdesk-api.onrender.com/health) (public). Everything
 else needs a login: see Authentication below.
